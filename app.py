@@ -21,6 +21,7 @@ if not GROQ_API_KEY:
 
 # ---------- UI ----------
 st.title("📧 AI Cold Email Assistant")
+st.caption("Generate personalized cold emails for job applications using resumes and job descriptions")
 st.caption("Provide ANY one of: Resume, Job Description, or a Portfolio/LinkedIn/GitHub link. Name/Role/Company help personalize the email.")
 
 name = st.text_input("Your Name")
@@ -166,4 +167,5 @@ if generate_button:
         st.code(email_text, language="markdown")
     except Exception as e:
         st.error(f"Error generating email: {e}")
+
 
