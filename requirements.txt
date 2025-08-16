@@ -1,4 +1,0 @@
-streamlit
-langchain
-chromadb
-openai
