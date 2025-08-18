@@ -20,7 +20,7 @@ if not GROQ_API_KEY:
     st.stop()
 
 # ---------- UI ----------
-st.title("📧 AI Cold Email Assistant")
+st.title("📧 AI Cold Email Assistant for job applications ")
 st.caption("Generate personalized cold emails for job applications using resumes and job descriptions")
 st.caption("Provide ANY one of: Resume, Job Description, or a Portfolio/LinkedIn/GitHub link. Name/Role/Company help personalize the email.")
 
