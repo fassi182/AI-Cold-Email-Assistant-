@@ -38,6 +38,8 @@ temperature = st.slider("Creativity (temperature)", 0.0, 1.0, 0.7, 0.1)
 generate_button = st.button("Generate Cold Email", type="primary")
 
 # ---------- Read Resume ----------
+from ai_logic import read_resume, generate_email_locally
+
 def read_resume_streamlit(uploaded_file):
     if not uploaded_file:
         return ""
@@ -45,7 +47,7 @@ def read_resume_streamlit(uploaded_file):
     data = uploaded_file.read()
     with open(file_path, "wb") as f:
         f.write(data)
-    return generate_email_locally.read_resume(file_path)
+    return read_resume(file_path)
 
 # ---------- Generate ----------
 if generate_button:
