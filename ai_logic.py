@@ -6,11 +6,15 @@ from langchain_core.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
 
 # ---------- Load Environment ----------
-load_dotenv()
+load_dotenv()# Try local environment variable first
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY not found in environment")
 
+# If not found, try Streamlit secrets
+if not GROQ_API_KEY and "GROQ_API_KEY" in st.secrets.get("GROQ", {}):
+    GROQ_API_KEY = st.secrets["GROQ"]["GROQ_API_KEY"]
+
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY not found! Set it in .env (local) or Streamlit Secrets (cloud).")
 # ---------- Helpers ----------
 def nonempty(s) -> bool:
     return bool((s or "").strip())
