@@ -1,20 +1,20 @@
 import os
 import re
-import io
 import PyPDF2
 import streamlit as st
+import requests
+from requests.exceptions import RequestException
+from ai_logic import generate_email_locally
 
-# Detect if we're running on Streamlit Cloud
-ON_STREAMLIT_CLOUD = os.getenv("STREAMLIT_SERVER_PORT") is not None
-
-# ---------- Setup ----------
+# ---------- Config ----------
 st.set_page_config(page_title="AI Cold Email Assistant", page_icon="📧")
-os.makedirs("static", exist_ok=True)  # ensure 'static/' exists
+os.makedirs("static", exist_ok=True)
+
+BACKEND_URL = "http://localhost:8000/generate-email"  # Local backend
 
 # ---------- UI ----------
-st.title("📧 AI Cold Email Assistant for job applications")
-st.caption("Generate personalized cold emails for job applications using resumes and job descriptions")
-st.caption("Provide ANY one of: Resume, Job Description, or a Portfolio/LinkedIn/GitHub link. Name/Role/Company help personalize the email.")
+st.title("📧 AI Cold Email Assistant")
+st.caption("Generate personalized cold emails using Resume, Job Description, or Portfolio Link")
 
 name = st.text_input("Your Name")
 role = st.text_input("Role you're applying for")
@@ -22,113 +22,66 @@ company = st.text_input("Company Name")
 
 col1, col2 = st.columns(2)
 with col1:
-    resume_file = st.file_uploader("Upload Resume (PDF or TXT)", type=["pdf", "txt"])
+    resume_file = st.file_uploader("Upload Resume (PDF/TXT)", type=["pdf", "txt"])
 with col2:
     portfolio_link = st.text_input("Portfolio / LinkedIn / GitHub Link (optional)")
 
 job_description = st.text_area("Paste Job Description (optional)")
 
-# Debug helper
-with st.sidebar:
-    show_debug = st.checkbox("Show debug info", value=False)
-    model_name = st.selectbox(
-        "Model",
-        ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"],
-        index=0
-    )
-    temperature = st.slider("Creativity (temperature)", 0.0, 1.0, 0.7, 0.1)
+model_name = st.selectbox(
+    "Groq model",
+    ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"],
+    index=0
+)
+temperature = st.slider("Creativity (temperature)", 0.0, 1.0, 0.7, 0.1)
 
 generate_button = st.button("Generate Cold Email", type="primary")
 
-# ---------- Helpers ----------
-def nonempty(s) -> bool:
-    return bool((s or "").strip())
-
-def clean(s) -> str:
-    return (s or "").strip()
-
-def read_resume(uploaded_file) -> str:
-    """Read PDF/TXT resume to text. Saves a copy under static/ to avoid temp-buffer issues."""
+# ---------- Read Resume ----------
+def read_resume_streamlit(uploaded_file):
     if not uploaded_file:
         return ""
-    try:
-        file_path = os.path.join("static", uploaded_file.name)
-        data = uploaded_file.read()
-        with open(file_path, "wb") as f:
-            f.write(data)
-
-        if uploaded_file.name.lower().endswith(".txt"):
-            try:
-                return data.decode("utf-8")
-            except UnicodeDecodeError:
-                return data.decode("latin-1", errors="ignore")
-
-        if uploaded_file.name.lower().endswith(".pdf"):
-            text = ""
-            with open(file_path, "rb") as f:
-                reader = PyPDF2.PdfReader(f)
-                for page in reader.pages:
-                    page_text = page.extract_text() or ""
-                    text += page_text
-            return re.sub(r"\n{3,}", "\n\n", text.strip())
-    except Exception as e:
-        st.error(f"Error reading resume: {e}")
-    return ""
+    file_path = os.path.join("static", uploaded_file.name)
+    data = uploaded_file.read()
+    with open(file_path, "wb") as f:
+        f.write(data)
+    return generate_email_locally.read_resume(file_path)
 
 # ---------- Generate ----------
 if generate_button:
-    name_c = clean(name)
-    role_c = clean(role)
-    company_c = clean(company)
-    jd_c = clean(job_description)
-    link_c = clean(portfolio_link)
-    resume_text = read_resume(resume_file)
+    resume_text = read_resume_streamlit(resume_file)
 
-    # Validation
-    have_source = bool(resume_text.strip() or jd_c or link_c)
-    if not have_source:
-        st.warning("Please provide at least one source: Resume, Job Description, or Portfolio/LinkedIn/GitHub link.")
-        st.stop()
+    payload = {
+        "name": name,
+        "role": role,
+        "company": company,
+        "portfolio_link": portfolio_link,
+        "resume_text": resume_text,
+        "job_description": job_description,
+        "model_name": model_name,
+        "temperature": temperature
+    }
 
+    email_text = ""
+    # Try backend first
     try:
-        if ON_STREAMLIT_CLOUD:
-            # ----- Call AI logic directly -----
-            from ai_logic import generate_cold_email
-
-            email_text = generate_cold_email(
-                name=name_c,
-                role=role_c,
-                company=company_c,
-                portfolio_link=link_c,
-                resume_text=resume_text,
-                job_description=jd_c,
-                model_name=model_name,
-                temperature=temperature
-            )
-
+        response = requests.post(BACKEND_URL, json=payload, timeout=5)
+        if response.status_code == 200:
+            email_text = response.json().get("email", "")
         else:
-            # ----- Call FastAPI backend locally -----
-            import requests
+            email_text = f"Backend error: {response.text}"
+    except RequestException:
+        # Backend unavailable, call AI logic directly
+        email_text = generate_email_locally(
+            name=name,
+            role=role,
+            company=company,
+            portfolio_link=portfolio_link,
+            resume_text=resume_text,
+            job_description=job_description,
+            model_name=model_name,
+            temperature=temperature
+        )
 
-            BACKEND_URL = "http://localhost:8000/generate-email"
-            payload = {
-                "name": name_c,
-                "role": role_c,
-                "company": company_c,
-                "portfolio_link": link_c,
-                "resume_text": resume_text,
-                "job_description": jd_c,
-                "model_name": model_name,
-                "temperature": temperature
-            }
-
-            response = requests.post(BACKEND_URL, json=payload)
-            response.raise_for_status()
-            email_text = response.json().get("email", "Error: No email returned from backend")
-
-        # Show result
-        st.subheader("✅ Generated Cold Email")
-        st.code(email_text, language="markdown")
-
-    except Exception as e:
-        st.error(f"Error generating email: {e}")
+    st.subheader("✅ Generated Cold Email")
+    st.code(email_text, language="markdown")
