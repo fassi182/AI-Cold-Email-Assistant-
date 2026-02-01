@@ -5,7 +5,7 @@ import PyPDF2
 import streamlit as st
 from dotenv import load_dotenv
 
-# ✅ AI logic import (NO LangChain / Groq here)
+# ✅ AI logic import 
 from ai_logic import generate_cold_email
 
 # ---------- Setup ----------
