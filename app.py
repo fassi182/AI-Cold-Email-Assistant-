@@ -1,145 +1,106 @@
-# app.py
 import os
 import re
 import PyPDF2
 import streamlit as st
 from dotenv import load_dotenv
-
-
 from ai_logic import generate_cold_email
 
 # ---------- Setup ----------
-st.set_page_config(page_title="AI Cold Email Assistant", page_icon="📧")
-os.makedirs("static", exist_ok=True)
+load_dotenv()
+st.set_page_config(page_title="AI Cold Email Assistant", page_icon="📧", layout="centered")
 
-load_dotenv()  # only needed to ensure env is loaded for ai_logic
+# Ensure static directory exists for file processing
+if not os.path.exists("static"):
+    os.makedirs("static")
 
-# ---------- UI ----------
-st.title("📧 AI Cold Email Assistant for Job Applications")
-st.caption(
-    "Generate personalized cold emails using resumes and job descriptions.\n"
-    "Provide ANY one of: Resume, Job Description, or Portfolio/LinkedIn/GitHub link."
-)
+# ---------- UI Header ----------
+st.title("📧 AI Cold Email Assistant")
+st.markdown("""
+    Generate high-converting cold emails for your job hunt. 
+    *Fill in the details below to get started.*
+""")
 
-name = st.text_input("Your Name")
-role = st.text_input("Role you're applying for")
-company = st.text_input("Company Name")
+# ---------- Input Section ----------
+with st.container():
+    col_a, col_b = st.columns(2)
+    with col_a:
+        name = st.text_input("Your Name", placeholder="e.g. John Doe")
+        company = st.text_input("Target Company", placeholder="e.g. Google")
+    with col_b:
+        role = st.text_input("Target Role", placeholder="e.g. Software Engineer")
+        portfolio_link = st.text_input("Portfolio / LinkedIn Link", placeholder="https://...")
 
+# Content Sources
+st.divider()
 col1, col2 = st.columns(2)
 with col1:
-    resume_file = st.file_uploader(
-        "Upload Resume (PDF or TXT)",
-        type=["pdf", "txt"]
-    )
+    resume_file = st.file_uploader("Upload Resume (PDF or TXT)", type=["pdf", "txt"])
 
 with col2:
-    portfolio_link = st.text_input(
-        "Portfolio / LinkedIn / GitHub Link (optional)"
-    )
+    job_description = st.text_area("Paste Job Description (Optional)", height=150)
 
-job_description = st.text_area("Paste Job Description (optional)")
-
-# ---------- Sidebar ----------
+# ---------- Sidebar Settings ----------
 with st.sidebar:
-    show_debug = st.checkbox("Show debug info", value=False)
-
+    st.header("⚙️ Model Settings")
     model_name = st.selectbox(
-        "Groq model",
-        [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-        ],
-        index=0,
+        "Select Model",
+        ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"],
+        help="Llama-3.3 is usually the most balanced for writing tasks."
     )
+    
+    temperature = st.slider("Creativity Level", 0.0, 1.0, 0.7, 0.1)
+    show_debug = st.checkbox("Show Debug Details")
 
-    temperature = st.slider(
-        "Creativity (temperature)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.7,
-        step=0.1,
-    )
-
-generate_button = st.button("Generate Cold Email", type="primary")
-
-# ---------- Helpers ----------
-def clean(text: str) -> str:
-    return (text or "").strip()
-
-def read_resume(uploaded_file) -> str:
-    """
-    Read PDF or TXT resume and return plain text.
-    File is saved to static/ to avoid Streamlit temp-buffer issues.
-    """
-    if not uploaded_file:
+# ---------- Logic Functions ----------
+def extract_resume_text(uploaded_file):
+    """Extracts text from uploaded PDF or TXT."""
+    if uploaded_file is None:
+        return ""
+    
+    try:
+        if uploaded_file.name.endswith(".txt"):
+            return uploaded_file.read().decode("utf-8")
+        
+        elif uploaded_file.name.endswith(".pdf"):
+            pdf_reader = PyPDF2.PdfReader(uploaded_file)
+            text = "".join([page.extract_text() or "" for page in pdf_reader.pages])
+            return re.sub(r"\n{3,}", "\n\n", text.strip())
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
         return ""
 
-    try:
-        file_path = os.path.join("static", uploaded_file.name)
-        data = uploaded_file.read()
+# ---------- Action ----------
+if st.button("Generate Cold Email ✨", type="primary", use_container_width=True):
+    resume_text = extract_resume_text(resume_file)
+    
+    # Check if we have enough info
+    if not (resume_text or job_description or portfolio_link):
+        st.error("⚠️ Please provide at least a Resume, Job Description, or Portfolio link.")
+    else:
+        try:
+            with st.spinner("🤖 AI is drafting your email..."):
+                email_text = generate_cold_email(
+                    name=name.strip(),
+                    role=role.strip(),
+                    company=company.strip(),
+                    portfolio_link=portfolio_link.strip(),
+                    resume_text=resume_text,
+                    job_description=job_description.strip(),
+                    model_name=model_name,
+                    temperature=temperature,
+                )
 
-        with open(file_path, "wb") as f:
-            f.write(data)
+            # Display Results
+            st.success("Email Generated!")
+            
+            if show_debug:
+                st.write(f"**Debug Info:** Model: {model_name} | Temp: {temperature}")
 
-        if uploaded_file.name.lower().endswith(".txt"):
-            return data.decode("utf-8", errors="ignore")
+            st.subheader("Your Draft")
+            # Using st.code makes it very easy for users to click "Copy"
+            st.code(email_text, language="text")
+            
+            st.info("💡 Tip: Review and personalize the brackets before sending!")
 
-        if uploaded_file.name.lower().endswith(".pdf"):
-            text = ""
-            with open(file_path, "rb") as f:
-                reader = PyPDF2.PdfReader(f)
-                for page in reader.pages:
-                    text += page.extract_text() or ""
-
-            return re.sub(r"\n{3,}", "\n\n", text.strip())
-
-    except Exception as e:
-        st.error(f"Error reading resume: {e}")
-
-    return ""
-
-# ---------- Generate ----------
-if generate_button:
-    name_c = clean(name)
-    role_c = clean(role)
-    company_c = clean(company)
-    link_c = clean(portfolio_link)
-    jd_c = clean(job_description)
-
-    resume_text = read_resume(resume_file)
-
-    # At least one content source required
-    have_source = bool(resume_text or jd_c or link_c)
-
-    if not have_source:
-        st.warning(
-            "Please provide at least one source:\n"
-            "• Resume\n• Job Description\n• Portfolio/LinkedIn/GitHub link"
-        )
-        st.stop()
-
-    if show_debug:
-        st.info(
-            f"DEBUG → name='{name_c}', role='{role_c}', company='{company_c}', "
-            f"resume_len={len(resume_text)}, jd_len={len(jd_c)}, link='{link_c}'"
-        )
-
-    try:
-        with st.spinner("Generating cold email..."):
-            email_text = generate_cold_email(
-                name=name_c,
-                role=role_c,
-                company=company_c,
-                portfolio_link=link_c,
-                resume_text=resume_text,
-                job_description=jd_c,
-                model_name=model_name,
-                temperature=temperature,
-            )
-
-        st.subheader("✅ Generated Cold Email")
-        st.code(email_text, language="markdown")
-
-    except Exception as e:
-        st.error(f"Error generating email: {e}")
+        except Exception as e:
+            st.error(f"Generation failed: {str(e)}")

@@ -1,23 +1,32 @@
-# ai_logic.py
 import os
+from typing import Any
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 # Load environment variables
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY not found. Please set it in .env or cloud environment variables.")
+# --- Configuration & Model Factory ---
+def get_model(model_name: str, temperature: float):
+    """
+    Factory function to easily swap providers.
+    In the future, you can add 'if model_name.startswith("gpt"): return ChatOpenAI(...)'
+    """
+    # Currently using Groq
+    return ChatGroq(
+        groq_api_key=os.getenv("GROQ_API_KEY"),
+        model_name=model_name,
+        temperature=temperature
+    )
 
-# Prompt template
+# --- Prompt Design ---
 PROMPT = ChatPromptTemplate.from_template(
     """
-You are an expert career advisor.
+You are an expert career advisor. 
 Write a concise, friendly, and professional cold email for a job application.
 
-Base the email on any provided sources below. If a source is missing, ignore it.
 - Name: {name}
 - Role: {role}
 - Company: {company}
@@ -26,16 +35,17 @@ Base the email on any provided sources below. If a source is missing, ignore it.
 - Job Description: {job_description}
 
 Requirements:
-0) Also mention the subject according to job description/role or as given in description
-1) Personalize to the role/company (if given)
-2) Highlight 2–3 highly relevant skills/achievements from resume or link context
-3) Keep it ~120–160 words, natural (not robotic), with a polite CTA
-4) Close with "Best regards, {name}" if name is provided
+1) Mention a relevant subject line based on the details.
+2) Personalize to the role/company.
+3) Highlight 2–3 relevant skills/achievements.
+4) Word count: 120–160 words.
+5) Return ONLY the email body.
 
-Return only the email body (no subject line).
+Best regards, {name}
 """
 )
 
+# --- Core Logic ---
 def generate_cold_email(
     name: str,
     role: str,
@@ -47,22 +57,24 @@ def generate_cold_email(
     temperature: float = 0.7
 ) -> str:
     """
-    Core AI function used by FastAPI or any frontend.
+    Uses LCEL (LangChain Expression Language) to chain the prompt, model, and parser.
     """
-    llm = ChatGroq(
-        groq_api_key=GROQ_API_KEY,
-        model_name=model_name,
-        temperature=temperature
-    )
+    
+    # 1. Initialize the model via the factory
+    llm = get_model(model_name, temperature)
 
-    messages = PROMPT.format_messages(
-        name=name or "",
-        role=role or "",
-        company=company or "",
-        portfolio_link=portfolio_link or "",
-        resume_text=resume_text or "",
-        job_description=job_description or ""
-    )
+    # 2. Define the Chain (Prompt -> LLM -> Output as String)
+    # The '|' operator chains these components seamlessly
+    chain = PROMPT | llm | StrOutputParser()
 
-    response = llm.invoke(messages)
-    return getattr(response, "content", str(response))
+    # 3. Invoke the chain with a dictionary of inputs
+    email_content = chain.invoke({
+        "name": name or "Candidate",
+        "role": role or "the position",
+        "company": company or "your company",
+        "portfolio_link": portfolio_link or "Not provided",
+        "resume_text": resume_text or "Not provided",
+        "job_description": job_description or "Not provided"
+    })
+
+    return email_content
